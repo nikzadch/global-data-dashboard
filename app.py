@@ -6,6 +6,25 @@ st.set_page_config(page_title="World Bank Dashboard", layout="wide")
 
 st.title("🌍 World Bank Interactive Dashboard")
 
+with st.expander("App information"):
+    st.write("""
+        This application provides you with interactive dashboards containing valuable information about countries. The data is used here
+             is gathered from [Wrold Bank](https://data.worldbank.org/).
+    """)
+
+st.divider() 
+
+st.markdown(
+    """
+    <style>
+    /* Selected state (non-hover) */
+    [data-baseweb="popover"] li[role="option"][aria-selected="true"] {
+        background-color: red !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
