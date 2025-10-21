@@ -26,7 +26,7 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    ["GDP per Capita", "Population Growth", "Economic Overview"]
+    ["Social Development Overview", "Population Growth", "Economic Overview"]
 )
 
 # ============================================================
@@ -63,29 +63,105 @@ search_selection = st.sidebar.selectbox(
 st.divider()
 
 # ============================================================
-# BASIC DASHBOARDS
+# NEW: SOCIAL DEVELOPMENT DASHBOARD (CROSS-FILTERING)
 # ============================================================
-if dashboard_option in ["GDP per Capita", "Population Growth", "CO2 Emissions"]:
-    indicator_map = {
-        "GDP per Capita": "NY.GDP.PCAP.CD",
-        "Population Growth": "SP.POP.GROW",
-        "CO2 Emissions": "EN.ATM.CO2E.PC"
-    }
-    indicator = indicator_map[dashboard_option]
+if dashboard_option == "Social Development Overview":
+    st.markdown("### 🧑‍🏫 Social Development — Income Equality, Education, and Health")
 
+    # --- Fetch data ---
+    with st.spinner("Loading social development indicators..."):
+        gini_df = get_worldbank_data("SI.POV.GINI")       # Gini Index (income inequality)
+        education_df = get_worldbank_data("SE.ADT.LITR.ZS")  # Literacy rate, adult total
+        life_df = get_worldbank_data("SP.DYN.LE00.IN")       # Life expectancy at birth
+        pop_df = get_worldbank_data("SP.POP.TOTL")           # Population for bubble size
+
+    # --- Validate data ---
+    if gini_df.empty or education_df.empty or life_df.empty or pop_df.empty:
+        st.error("World Bank API returned no data for one of the social indicators.")
+        st.stop()
+
+    # --- Merge datasets safely ---
+    merged = (
+        gini_df.merge(education_df, on=["country", "countryiso3code", "date"], suffixes=("_gini", "_edu"))
+                .merge(life_df, on=["country", "countryiso3code", "date"])
+    )
+    merged.rename(columns={"indicator_value": "life_expectancy"}, inplace=True)
+    merged = merged.merge(pop_df, on=["country", "countryiso3code", "date"])
+    merged.rename(columns={"indicator_value": "population"}, inplace=True)
+
+    if merged.empty:
+        st.error("No merged data available — World Bank API returned incomplete datasets.")
+        st.stop()
+
+    # --- Apply Global Filters ---
+    # FIXED: Use the global 'selected_year' and 'search_selection' variables
+    year_df = merged[merged["date"] == selected_year]
+    if search_selection != "All Countries":
+        year_df = year_df[year_df["country"] == search_selection]
+
+
+    # --- Scatter Plot ---
+    st.write("Click a country in the scatter plot to view its Gini Index trend over time 👇")
+    fig1 = px.scatter(
+        year_df.dropna(subset=["indicator_value_edu", "life_expectancy", "population", "indicator_value_gini"]),
+        x="indicator_value_edu",
+        y="life_expectancy",
+        size="population",
+        color="indicator_value_gini",
+        hover_name="country",
+        title=f"Education vs. Health vs. Income Equality ({selected_year})",
+        labels={
+            "indicator_value_edu": "Adult Literacy Rate (%)",
+            "life_expectancy": "Life Expectancy (Years)",
+            "indicator_value_gini": "Gini Index (Income Inequality)"
+        },
+        color_continuous_scale=px.colors.sequential.Viridis,
+    )
+
+    clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
+
+    # --- Capture click selection ---
+    click_selection = None
+    if clicked and clicked.selection and len(clicked.selection.points) > 0:
+        click_selection = clicked.selection.points[0]["hovertext"]
+
+    # --- Country Trend ---
+    # FIXED: Prioritize the search box selection, then the click selection
+    country_for_trend = None
+    if search_selection != "All Countries":
+        country_for_trend = search_selection
+    else:
+        country_for_trend = click_selection
+
+    if country_for_trend:
+        st.subheader(f"📉 Gini Index Over Time — {country_for_trend}")
+        country_df = merged[merged["country"] == country_for_trend]
+        fig2 = px.line(
+            country_df,
+            x="date",
+            y="indicator_value_gini",
+            title=f"Gini Index Over Time ({country_for_trend})",
+            labels={"indicator_value_gini": "Gini Index (Income Inequality)"}
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("Select a country from the search box or click one in the scatter plot to view its Gini trend.")
+
+
+# ============================================================
+# BASIC DASHBOARD
+# ============================================================
+elif dashboard_option == "Population Growth":
     # --- Load data ---
     with st.spinner(f"Fetching {dashboard_option} data..."):
-        df = get_worldbank_data(indicator)
+        df = get_worldbank_data("SP.POP.GROW")
 
     if df.empty:
         st.error(f"No data available for {dashboard_option}.")
         st.stop()
 
     # --- Apply Global Filters ---
-    # Filter by the globally selected year
     filtered_df = df[df["date"] == selected_year]
-    
-    # Filter by the globally selected country
     if search_selection != "All Countries":
         filtered_df = filtered_df[filtered_df["country"] == search_selection]
 
@@ -100,7 +176,6 @@ if dashboard_option in ["GDP per Capita", "Population Growth", "CO2 Emissions"]:
         title=f"{dashboard_option} ({selected_year})",
     )
     fig.update_layout(xaxis_title="Country", yaxis_title=dashboard_option)
-
     st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
@@ -132,17 +207,14 @@ elif dashboard_option == "Economic Overview":
         st.stop()
 
     # --- Apply Global Filters ---
-    # Filter by the globally selected year
     year_df = merged[merged["date"] == selected_year]
-    
-    # Filter by the globally selected country
     if search_selection != "All Countries":
         year_df = year_df[year_df["country"] == search_selection]
 
     # --- Scatter Plot ---
     st.write("Click a country in the scatter plot to view its GDP trend over time 👇")
     fig1 = px.scatter(
-        year_df, # This df is now filtered by year and country
+        year_df,
         x="indicator_value_gdp",
         y="indicator_value_life",
         size="population",
@@ -159,11 +231,7 @@ elif dashboard_option == "Economic Overview":
         click_selection = clicked.selection.points[0]["hovertext"]
 
     # --- Country Trend ---
-    country_for_trend = None
-    if search_selection != "All Countries":
-        country_for_trend = search_selection  # Search box selection takes priority
-    else:
-        country_for_trend = click_selection   # Otherwise, use the clicked country
+    country_for_trend = search_selection if search_selection != "All Countries" else click_selection
 
     if country_for_trend:
         st.subheader(f"📈 GDP per Capita Over Time — {country_for_trend}")
