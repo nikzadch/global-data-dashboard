@@ -11,6 +11,10 @@ with st.expander("App information"):
         This application provides you with interactive dashboards containing valuable information about countries. The data is used here
             is gathered from [World Bank](https://data.worldbank.org/).
     """)
+    st.write("""
+        You can use the tab on the left side to select the dashboard and apply different filters.
+    """)
+
 
 st.markdown(
     """
@@ -26,7 +30,7 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    ["Social Development Overview", "Population Growth", "Economic Overview"]
+    [ "Economic Overview", "Social Development Overview", "Population Growth"]
 )
 
 # ============================================================
