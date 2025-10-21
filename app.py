@@ -9,10 +9,8 @@ st.title("🌍 World Bank Interactive Dashboard")
 with st.expander("App information"):
     st.write("""
         This application provides you with interactive dashboards containing valuable information about countries. The data is used here
-             is gathered from [Wrold Bank](https://data.worldbank.org/).
+            is gathered from [World Bank](https://data.worldbank.org/).
     """)
-
-st.divider() 
 
 st.markdown(
     """
@@ -32,6 +30,39 @@ dashboard_option = st.sidebar.selectbox(
 )
 
 # ============================================================
+# GLOBAL FILTERS
+# ============================================================
+# Fetch a base dataset to populate filters, ensuring they are always available.
+# Population data is a good general-purpose choice for broad country/year coverage.
+with st.spinner("Initializing filters..."):
+    base_df = get_worldbank_data("SP.POP.TOTL")
+
+if base_df.empty:
+    st.error("Could not load initial data to create filters.")
+    st.stop()
+
+# Get unique lists for years and countries from the base data
+years = sorted(base_df["date"].unique(), reverse=True)
+countries = sorted(base_df["country"].unique())
+
+# Define the filters globally in the sidebar
+selected_year = st.sidebar.slider(
+    "Select Year",
+    min_value=min(years),
+    max_value=max(years),
+    value=max(years)
+)
+
+search_selection = st.sidebar.selectbox(
+    "Search for a Country",
+    options=["All Countries"] + countries,
+    index=0
+)
+
+
+st.divider()
+
+# ============================================================
 # BASIC DASHBOARDS
 # ============================================================
 if dashboard_option in ["GDP per Capita", "Population Growth", "CO2 Emissions"]:
@@ -43,20 +74,23 @@ if dashboard_option in ["GDP per Capita", "Population Growth", "CO2 Emissions"]:
     indicator = indicator_map[dashboard_option]
 
     # --- Load data ---
-    with st.spinner("Fetching World Bank data..."):
+    with st.spinner(f"Fetching {dashboard_option} data..."):
         df = get_worldbank_data(indicator)
 
     if df.empty:
-        st.error("No data available.")
+        st.error(f"No data available for {dashboard_option}.")
         st.stop()
 
-    # --- Filters ---
-    years = sorted(df["date"].unique(), reverse=True)
-    selected_year = st.sidebar.slider("Select Year", min_value=min(years), max_value=max(years), value=max(years))
-
+    # --- Apply Global Filters ---
+    # Filter by the globally selected year
     filtered_df = df[df["date"] == selected_year]
+    
+    # Filter by the globally selected country
+    if search_selection != "All Countries":
+        filtered_df = filtered_df[filtered_df["country"] == search_selection]
 
     # --- Plotly Interactive Visualization ---
+    st.subheader(f"{dashboard_option} ({selected_year})")
     fig = px.scatter(
         filtered_df,
         x="country",
@@ -89,7 +123,7 @@ elif dashboard_option == "Economic Overview":
     # --- Merge datasets ---
     merged = (
         gdp_df.merge(life_df, on=["country", "countryiso3code", "date"], suffixes=("_gdp", "_life"))
-               .merge(pop_df, on=["country", "countryiso3code", "date"])
+              .merge(pop_df, on=["country", "countryiso3code", "date"])
     )
     merged.rename(columns={"indicator_value": "population"}, inplace=True)
 
@@ -97,26 +131,18 @@ elif dashboard_option == "Economic Overview":
         st.error("No merged data available — World Bank API returned incomplete datasets.")
         st.stop()
 
-    # --- Year filtering ---
-    years = sorted(merged["date"].unique(), reverse=True)
-    if not years:
-        st.error("No available years in the dataset.")
-        st.stop()
-
-    selected_year = st.sidebar.slider(
-        "Select Year",
-        min_value=min(years),
-        max_value=max(years),
-        value=max(years)
-    )
-
+    # --- Apply Global Filters ---
+    # Filter by the globally selected year
     year_df = merged[merged["date"] == selected_year]
+    
+    # Filter by the globally selected country
+    if search_selection != "All Countries":
+        year_df = year_df[year_df["country"] == search_selection]
 
     # --- Scatter Plot ---
     st.write("Click a country in the scatter plot to view its GDP trend over time 👇")
-
     fig1 = px.scatter(
-        year_df,
+        year_df, # This df is now filtered by year and country
         x="indicator_value_gdp",
         y="indicator_value_life",
         size="population",
@@ -125,27 +151,29 @@ elif dashboard_option == "Economic Overview":
         title=f"GDP vs Life Expectancy ({selected_year})",
         color_continuous_scale="Viridis",
     )
-
     clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
 
     # --- Capture click selection ---
-    selected_country = None
+    click_selection = None
     if clicked and clicked.selection and len(clicked.selection.points) > 0:
-        selected_country = clicked.selection.points[0]["hovertext"]
+        click_selection = clicked.selection.points[0]["hovertext"]
 
     # --- Country Trend ---
-    if selected_country:
-        st.subheader(f"📈 GDP per Capita Over Time — {selected_country}")
-        country_df = merged[merged["country"] == selected_country]
+    country_for_trend = None
+    if search_selection != "All Countries":
+        country_for_trend = search_selection  # Search box selection takes priority
+    else:
+        country_for_trend = click_selection   # Otherwise, use the clicked country
+
+    if country_for_trend:
+        st.subheader(f"📈 GDP per Capita Over Time — {country_for_trend}")
+        country_df = merged[merged["country"] == country_for_trend]
         fig2 = px.line(
             country_df,
             x="date",
             y="indicator_value_gdp",
-            title=f"GDP per Capita Over Time ({selected_country})",
+            title=f"GDP per Capita Over Time ({country_for_trend})",
         )
         st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info("Select a country in the scatter plot to view its GDP trend.")
-
-
-
+        st.info("Select a country from the search box or click one in the scatter plot to view its GDP trend.")
