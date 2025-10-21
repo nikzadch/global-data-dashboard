@@ -2,9 +2,9 @@ import streamlit as st
 import plotly.express as px
 from api import get_worldbank_data
 
-st.set_page_config(page_title="World Bank Dashboard", layout="wide")
+st.set_page_config(page_title="World Bank Dashboards", layout="wide")
 
-st.title("🌍 World Bank Interactive Dashboard")
+st.title("🌍 World Bank Interactive Dashboards")
 
 with st.expander("App information"):
     st.write("""
@@ -183,6 +183,18 @@ elif dashboard_option == "Population Growth":
 # ============================================================
 elif dashboard_option == "Economic Overview":
     st.markdown("### 💹 Economic Overview — Explore GDP, Life Expectancy, and Population")
+    
+    with st.expander("Data Explanation"):
+        st.write("""
+           GDP (Gross Domestic Product): GDP measures the total monetary value of all goods and services produced within a country's borders over a specific period (usually a year or quarter).
+            It's a key indicator of economic health, showing the size and growth of an economy. There are variants like nominal GDP (at current prices) and real GDP (adjusted for inflation).
+            Per capita GDP divides this by population for a per-person average.
+        """)
+        st.write("""
+            Life Expectancy Index: Life expectancy is the average number of years a person is expected to live based on current mortality rates, often calculated at birth.
+            It's an index used in metrics like the Human Development Index (HDI) to gauge health and longevity in a population. Factors influencing it include healthcare, nutrition, sanitation, and lifestyle;
+            global average is around 73 years, varying by country (e.g., higher in Japan, lower in some African nations).
+    """)
 
     # --- Fetch data ---
     with st.spinner("Loading economic indicators..."):
