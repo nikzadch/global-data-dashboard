@@ -212,7 +212,7 @@ elif dashboard_option == "Economic Overview":
         year_df = year_df[year_df["country"] == search_selection]
 
     # --- Scatter Plot ---
-    st.write("Click a country in the scatter plot to view its GDP trend over time 👇")
+    st.write("Click a country in the scatter plot to view its trends over time 👇")
     fig1 = px.scatter(
         year_df,
         x="indicator_value_gdp",
@@ -222,6 +222,10 @@ elif dashboard_option == "Economic Overview":
         hover_name="country",
         title=f"GDP vs Life Expectancy ({selected_year})",
         color_continuous_scale="Viridis",
+        labels={
+            "indicator_value_gdp": "GDP per capita (US$)",
+            "indicator_value_life": "Life Expectancy (years)"
+        },
     )
     clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
 
@@ -230,18 +234,38 @@ elif dashboard_option == "Economic Overview":
     if clicked and clicked.selection and len(clicked.selection.points) > 0:
         click_selection = clicked.selection.points[0]["hovertext"]
 
-    # --- Country Trend ---
+    # --- Country Trend Charts ---
     country_for_trend = search_selection if search_selection != "All Countries" else click_selection
 
     if country_for_trend:
-        st.subheader(f"📈 GDP per Capita Over Time — {country_for_trend}")
+        st.subheader(f"📈 Economic & Population Trends — {country_for_trend}")
         country_df = merged[merged["country"] == country_for_trend]
-        fig2 = px.line(
-            country_df,
-            x="date",
-            y="indicator_value_gdp",
-            title=f"GDP per Capita Over Time ({country_for_trend})",
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+
+        # NEW: Create two columns for side-by-side charts
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Chart 1: GDP Trend (Existing)
+            fig2 = px.line(
+                country_df,
+                x="date",
+                y="indicator_value_gdp",
+                title=f"GDP per Capita Over Time",
+                labels={"indicator_value_gdp": "GDP per capita (US$)"},
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with col2:
+            # Chart 2: Population Trend (New)
+            fig3 = px.line(
+                country_df,
+                x="date",
+                y="population",
+                title=f"Population Over Time",
+                labels={"population": "Total Population"},
+                color_discrete_sequence=['#FF8C00'] # Orange color for contrast
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+            
     else:
-        st.info("Select a country from the search box or click one in the scatter plot to view its GDP trend.")
+        st.info("Select a country from the search box or click one in the scatter plot to view its trends.")
