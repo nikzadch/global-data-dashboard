@@ -1,10 +1,61 @@
 import streamlit as st
 import plotly.express as px
 from api import get_worldbank_data
+from translations import TRANSLATIONS
+
+# --- Language Selection ---
+if 'lang' not in st.session_state:
+    st.session_state.lang = 'en' # Default language
+
+# Create a mapping from language code to full name for the selector
+LANGUAGES = {"en": "English", "fa": "فارسی (Farsi)"}
+
+# The language selector widget itself
+selected_lang_name = st.sidebar.selectbox(
+    "Language / زبان",
+    options=list(LANGUAGES.values()),
+    # Format function to display language names correctly
+    format_func=lambda lang: lang
+)
+
+# Update session state based on selection
+# Find the language code corresponding to the selected full name
+st.session_state.lang = [code for code, name in LANGUAGES.items() if name == selected_lang_name][0]
+
+# --- Helper function for translation ---
+def _(key):
+    """A helper function to get the translation for a given key."""
+    return TRANSLATIONS[st.session_state.lang][key]
+
+# --- RTL Support for Farsi ---
+if st.session_state.lang == 'fa':
+    st.markdown(
+        """
+        <style>
+        /* Flip the entire app for RTL */
+        body {
+            direction: rtl !important;
+        }
+        /* Ensure sidebar is on the right */
+        .main > div {
+            direction: rtl !important;
+        }
+        section[data-testid="stSidebar"] {
+            right: 0;
+            left: auto;
+        }
+        section[data-testid="stSidebar"] > div:first-child {
+            right: 0;
+            left: auto;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 st.set_page_config(page_title="World Bank Dashboards", layout="wide")
 
-st.title("🌍 World Bank Interactive Dashboards")
+st.title(_("title"))
 
 with st.expander("App information"):
     st.write("""
