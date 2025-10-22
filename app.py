@@ -190,14 +190,10 @@ elif dashboard_option == "Economic Overview":
     
     with st.expander("Data Explanation"):
         st.write("""
-           GDP (Gross Domestic Product): GDP measures the total monetary value of all goods and services produced within a country's borders over a specific period (usually a year or quarter).
-            It's a key indicator of economic health, showing the size and growth of an economy. There are variants like nominal GDP (at current prices) and real GDP (adjusted for inflation).
-            Per capita GDP divides this by population for a per-person average.
+            **GDP (Gross Domestic Product):** GDP measures the total monetary value of all goods and services produced within a country's borders over a specific period. It's a key indicator of economic health.
         """)
         st.write("""
-            Life Expectancy Index: Life expectancy is the average number of years a person is expected to live based on current mortality rates, often calculated at birth.
-            It's an index used in metrics like the Human Development Index (HDI) to gauge health and longevity in a population. Factors influencing it include healthcare, nutrition, sanitation, and lifestyle;
-            global average is around 73 years, varying by country (e.g., higher in Japan, lower in some African nations).
+            **Life Expectancy:** Life expectancy is the average number of years a person is expected to live based on current mortality rates. It's a key metric for gauging the health and longevity of a population.
     """)
 
     # --- Fetch data ---
@@ -227,22 +223,52 @@ elif dashboard_option == "Economic Overview":
     if search_selection != "All Countries":
         year_df = year_df[year_df["country"] == search_selection]
 
-    # --- Scatter Plot ---
-    st.write("Click a country in the scatter plot to view its trends over time 👇")
-    fig1 = px.scatter(
+    # --- Choropleth Map ---
+    st.markdown(f"#### Life Expectancy Across Countries ({selected_year})") # Use Streamlit markdown for title
+    st.write("Click a country on the map to view its trends over time 👇")
+    fig1 = px.choropleth(
         year_df,
-        x="indicator_value_gdp",
-        y="indicator_value_life",
-        size="population",
-        color="indicator_value_gdp",
-        hover_name="country",
-        title=f"GDP vs Life Expectancy ({selected_year})",
-        color_continuous_scale="Viridis",
-        labels={
-            "indicator_value_gdp": "GDP per capita (US$)",
-            "indicator_value_life": "Life Expectancy (years)"
+        locations="countryiso3code",  # Use ISO-3 country codes for mapping
+        color="indicator_value_life", # Color countries by life expectancy
+        hover_name="country",         # Display full country name on hover
+        hover_data={
+            "countryiso3code": False,
+            "indicator_value_life": ":.1f years", # Formatted life expectancy
+            "indicator_value_gdp": ":,.0f USD",   # Formatted GDP
+            "population": ":,.0f"                 # Formatted population
         },
+        color_continuous_scale="Viridis", # A good perceptually uniform colormap
+        labels={"indicator_value_life": "Life Expectancy (years)"},
     )
+    # Professional map styling
+    fig1.update_geos(
+        showcountries=True,
+        countrycolor="DarkGrey",
+        showland=True,
+        landcolor="lightgray",
+        showocean=True,
+        oceancolor="LightBlue",
+        showlakes=True,
+        lakecolor="LightBlue",
+        projection_type="natural earth", # Natural earth projection looks good
+        coastlinewidth=0.5,
+        coastlinecolor="DarkGrey",
+        lataxis_showgrid=False, # Hide latitude gridlines
+        lonaxis_showgrid=False  # Hide longitude gridlines
+    )
+    fig1.update_layout(
+        margin={"r":0,"t":0,"l":0,"b":0}, # Remove margins
+        coloraxis_colorbar=dict(
+            title="Life Expectancy (years)", # Set a clear colorbar title
+            orientation="h", # Horizontal colorbar is often cleaner at the bottom
+            y=-0.1, # Position below the map
+            x=0.5,
+            xanchor="center",
+            len=0.7 # Make it wider
+        ),
+        geo_bgcolor="white", # Ensure background is white
+    )
+    
     clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
 
     # --- Capture click selection ---
@@ -257,11 +283,10 @@ elif dashboard_option == "Economic Overview":
         st.subheader(f"📈 Economic & Population Trends — {country_for_trend}")
         country_df = merged[merged["country"] == country_for_trend]
 
-        # NEW: Create two columns for side-by-side charts
         col1, col2 = st.columns(2)
 
         with col1:
-            # Chart 1: GDP Trend (Existing)
+            # Chart 1: GDP Trend
             fig2 = px.line(
                 country_df,
                 x="date",
@@ -272,7 +297,7 @@ elif dashboard_option == "Economic Overview":
             st.plotly_chart(fig2, use_container_width=True)
 
         with col2:
-            # Chart 2: Population Trend (New)
+            # Chart 2: Population Trend
             fig3 = px.line(
                 country_df,
                 x="date",
@@ -284,4 +309,4 @@ elif dashboard_option == "Economic Overview":
             st.plotly_chart(fig3, use_container_width=True)
             
     else:
-        st.info("Select a country from the search box or click one in the scatter plot to view its trends.")
+        st.info("Select a country from the search box or click one on the map to view its trends.")
