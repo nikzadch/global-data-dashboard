@@ -23,6 +23,9 @@ st.markdown(
     [data-baseweb="popover"] li[role="option"][aria-selected="true"] {
         background-color: red !important;
     }
+    [data-baseweb="tooltip"] {
+    display: none !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
