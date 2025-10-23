@@ -70,56 +70,90 @@ st.divider()
 # NEW: SOCIAL DEVELOPMENT DASHBOARD (CROSS-FILTERING)
 # ============================================================
 if dashboard_option == "Social Development Overview":
-    st.markdown("### 🧑‍🏫 Social Development — Income Equality, Education, and Health")
+    st.markdown("### 🩺 Social Development — Health Expenditure vs. Life Expectancy")
 
     # --- Fetch data ---
     with st.spinner("Loading social development indicators..."):
-        gini_df = get_worldbank_data("SI.POV.GINI")       # Gini Index (income inequality)
-        education_df = get_worldbank_data("SE.ADT.LITR.ZS")  # Literacy rate, adult total
-        life_df = get_worldbank_data("SP.DYN.LE00.IN")       # Life expectancy at birth
-        pop_df = get_worldbank_data("SP.POP.TOTL")           # Population for bubble size
+        life_df = get_worldbank_data("SP.DYN.LE00.IN")        # Life expectancy at birth
+        health_df = get_worldbank_data("SH.XPD.CHEX.PC.CD")   # Current health expenditure per capita (USD)
+        pop_df = get_worldbank_data("SP.POP.TOTL")            # Population for hover data
 
     # --- Validate data ---
-    if gini_df.empty or education_df.empty or life_df.empty or pop_df.empty:
+    if life_df.empty or health_df.empty or pop_df.empty:
         st.error("World Bank API returned no data for one of the social indicators.")
         st.stop()
 
     # --- Merge datasets safely ---
     merged = (
-        gini_df.merge(education_df, on=["country", "countryiso3code", "date"], suffixes=("_gini", "_edu"))
-                .merge(life_df, on=["country", "countryiso3code", "date"])
+        life_df.merge(health_df, on=["country", "countryiso3code", "date"], suffixes=("_life", "_health"))
+               .merge(pop_df, on=["country", "countryiso3code", "date"])
     )
-    merged.rename(columns={"indicator_value": "life_expectancy"}, inplace=True)
-    merged = merged.merge(pop_df, on=["country", "countryiso3code", "date"])
-    merged.rename(columns={"indicator_value": "population"}, inplace=True)
+    merged.rename(columns={
+        "indicator_value_life": "life_expectancy",
+        "indicator_value_health": "health_expenditure",
+        "indicator_value": "population"
+    }, inplace=True)
 
     if merged.empty:
         st.error("No merged data available — World Bank API returned incomplete datasets.")
         st.stop()
 
     # --- Apply Global Filters ---
-    # FIXED: Use the global 'selected_year' and 'search_selection' variables
     year_df = merged[merged["date"] == selected_year]
     if search_selection != "All Countries":
         year_df = year_df[year_df["country"] == search_selection]
 
-
-    # --- Scatter Plot ---
-    st.write("Click a country in the scatter plot to view its Gini Index trend over time 👇")
-    fig1 = px.scatter(
-        year_df.dropna(subset=["indicator_value_edu", "life_expectancy", "population", "indicator_value_gini"]),
-        x="indicator_value_edu",
-        y="life_expectancy",
-        size="population",
-        color="indicator_value_gini",
+    # --- Bubble Map (px.scatter_geo) ---
+    st.markdown(f"#### Health Expenditure vs. Life Expectancy ({selected_year})")
+    st.write("Click a country on the map to view its health expenditure trend over time 👇")
+    
+    fig1 = px.scatter_geo(
+        year_df, # Use the globally filtered dataframe
+        locations="countryiso3code",
+        color="life_expectancy",
+        size="health_expenditure",
         hover_name="country",
-        title=f"Education vs. Health vs. Income Equality ({selected_year})",
-        labels={
-            "indicator_value_edu": "Adult Literacy Rate (%)",
-            "life_expectancy": "Life Expectancy (Years)",
-            "indicator_value_gini": "Gini Index (Income Inequality)"
+        hover_data={
+            "countryiso3code": False,
+            "life_expectancy": ":.1f years",
+            "health_expenditure": ":,.0f USD",
+            "population": ":,.0f"
         },
-        color_continuous_scale=px.colors.sequential.Viridis,
+        projection="natural earth",
+        title=f"Bubble size represents Health Expenditure per Capita (USD)",
+        color_continuous_scale="Plasma",
+        labels={
+            "life_expectancy": "Life Expectancy (Years)",
+            "health_expenditure": "Health Expenditure per Capita (USD)"
+        }
+    )
+    
+    fig1.update_geos(
+        showcountries=True,
+        countrycolor="DarkGrey",
+        showland=True,
+        landcolor="lightgray",
+        showocean=True,
+        oceancolor="LightBlue",
+        showlakes=True,
+        lakecolor="LightBlue",
+        projection_type="natural earth",
+        coastlinewidth=0.5,
+        coastlinecolor="DarkGrey",
+        lataxis_showgrid=False,
+        lonaxis_showgrid=False
+    )
+    fig1.update_layout(
+        margin={"r":0,"t":40,"l":0,"b":0}, # Title is now part of the fig, so t=40
+        coloraxis_colorbar=dict(
+            title="Life Expectancy (years)",
+            orientation="h",
+            y=-0.1,
+            x=0.5,
+            xanchor="center",
+            len=0.7
+        ),
+        geo_bgcolor="white",
     )
 
     clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
@@ -130,26 +164,25 @@ if dashboard_option == "Social Development Overview":
         click_selection = clicked.selection.points[0]["hovertext"]
 
     # --- Country Trend ---
-    # FIXED: Prioritize the search box selection, then the click selection
-    country_for_trend = None
-    if search_selection != "All Countries":
-        country_for_trend = search_selection
-    else:
-        country_for_trend = click_selection
+    country_for_trend = search_selection if search_selection != "All Countries" else click_selection
 
     if country_for_trend:
-        st.subheader(f"📉 Gini Index Over Time — {country_for_trend}")
+        st.subheader(f"💸 Health Expenditure Over Time — {country_for_trend}")
         country_df = merged[merged["country"] == country_for_trend]
-        fig2 = px.line(
-            country_df,
-            x="date",
-            y="indicator_value_gini",
-            title=f"Gini Index Over Time ({country_for_trend})",
-            labels={"indicator_value_gini": "Gini Index (Income Inequality)"}
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+        
+        if country_df.dropna(subset=['health_expenditure']).empty:
+             st.warning(f"No health expenditure trend data available for {country_for_trend}.")
+        else:
+            fig2 = px.line(
+                country_df,
+                x="date",
+                y="health_expenditure",
+                title=f"Health Expenditure per Capita Over Time ({country_for_trend})",
+                labels={"health_expenditure": "Health Expenditure per Capita (USD)"}
+            )
+            st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info("Select a country from the search box or click one in the scatter plot to view its Gini trend.")
+        st.info("Select a country from the search box or click one on the map to view its health expenditure trend.")
 
 
 # ============================================================
