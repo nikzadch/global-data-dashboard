@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.express as px
-from api import get_worldbank_data
+from api import get_data, get_worldbank_data
+from utils import fetch_and_merge_data, calculate_fairness_score
 
 st.set_page_config(page_title="World Bank Dashboards", layout="wide")
 
@@ -33,7 +34,7 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    [ "Economic Overview", "Social Development Overview", "Population Growth"]
+    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Population Growth"]
 )
 
 # ============================================================
@@ -42,7 +43,7 @@ dashboard_option = st.sidebar.selectbox(
 # Fetch a base dataset to populate filters, ensuring they are always available.
 # Population data is a good general-purpose choice for broad country/year coverage.
 with st.spinner("Initializing filters..."):
-    base_df = get_worldbank_data("SP.POP.TOTL")
+    base_df = get_data("WB_SP.POP.TOTL")
 
 if base_df.empty:
     st.error("Could not load initial data to create filters.")
@@ -77,9 +78,9 @@ if dashboard_option == "Social Development Overview":
 
     # --- Fetch data ---
     with st.spinner("Loading social development indicators..."):
-        life_df = get_worldbank_data("SP.DYN.LE00.IN")        # Life expectancy at birth
-        health_df = get_worldbank_data("SH.XPD.CHEX.PC.CD")   # Current health expenditure per capita (USD)
-        pop_df = get_worldbank_data("SP.POP.TOTL")            # Population for hover data
+        life_df = get_data("WB_SP.DYN.LE00.IN")        # Life expectancy at birth
+        health_df = get_data("WB_SH.XPD.CHEX.PC.CD")   # Current health expenditure per capita (USD)
+        pop_df = get_data("WB_SP.POP.TOTL")            # Population for hover data
 
     # --- Validate data ---
     if life_df.empty or health_df.empty or pop_df.empty:
@@ -194,7 +195,7 @@ if dashboard_option == "Social Development Overview":
 elif dashboard_option == "Population Growth":
     # --- Load data ---
     with st.spinner(f"Fetching {dashboard_option} data..."):
-        df = get_worldbank_data("SP.POP.GROW")
+        df = get_data("WB_SP.POP.GROW")
 
     if df.empty:
         st.error(f"No data available for {dashboard_option}.")
@@ -234,9 +235,9 @@ elif dashboard_option == "Economic Overview":
 
     # --- Fetch data ---
     with st.spinner("Loading economic indicators..."):
-        gdp_df = get_worldbank_data("NY.GDP.PCAP.CD")      # GDP per capita
-        life_df = get_worldbank_data("SP.DYN.LE00.IN")    # Life Expectancy at Birth
-        pop_df = get_worldbank_data("SP.POP.TOTL")        # Population total
+        gdp_df = get_data("WB_NY.GDP.PCAP.CD")      # GDP per capita
+        life_df = get_data("WB_SP.DYN.LE00.IN")    # Life Expectancy at Birth
+        pop_df = get_data("WB_SP.POP.TOTL")        # Population total
 
     # --- Validate data ---
     if gdp_df.empty or life_df.empty or pop_df.empty:
@@ -346,3 +347,138 @@ elif dashboard_option == "Economic Overview":
             
     else:
         st.info("Select a country from the search box or click one on the map to view its trends.")
+
+
+# ============================================================
+# Fairness & Development (CROSS-FILTER DASHBOARD)
+# ============================================================      # app.py -> Add this as a new elif block
+elif dashboard_option == "Fairness & Development":
+    st.markdown("### 📈 Development & Equality Index")
+    st.markdown("""
+    This score combines metrics for income fairness, gender equality, governance, education, health, and basic opportunity. 
+    **A higher score (and larger bubble) indicates better overall performance.**
+    """)
+
+    with st.spinner("Fetching and processing all time-series data..."):
+        # 1. Fetch ALL data (no year filter)
+        all_data = fetch_and_merge_data()
+        
+        if all_data.empty:
+            st.error("Could not retrieve any data for the required indicators.")
+            st.stop()
+            
+        # 2. Calculate scores for ALL data
+        score_df, components_df = calculate_fairness_score(all_data.copy())
+
+        if score_df.empty:
+            st.warning("No data available to display after calculations.")
+            st.stop()
+
+    # --- 3. Apply Global Filters (THE FIX) ---
+    # Filter by selected year *after* all calculations
+    year_df = score_df[score_df["date"] == selected_year]
+    
+    if year_df.empty:
+        st.warning(f"No countries had complete data for all 6 indicators in {selected_year}. Please try another year.")
+        st.stop()
+
+    # Create a separate df for the map that isn't filtered by country
+    map_df = year_df.copy() 
+    
+    # Apply country filter *only* to the data table (if selected)
+    if search_selection != "All Countries":
+        year_df = year_df[year_df["country"] == search_selection]
+
+    # --- 4. Bubble Map (px.scatter_geo) - THE "UGLY" FIX ---
+    st.markdown(f"#### Development & Equality Index Score ({selected_year})")
+    st.write("Click a country on the map to view its score component trends over time 👇")
+    
+    fig1 = px.scatter_geo(
+        map_df, # Use the year-filtered, non-country-filtered data
+        locations="countryiso3code",
+        color="fairness_score",
+        size="fairness_score", # Bubble size based on the score itself
+        hover_name="country",
+        hover_data={
+            "countryiso3code": False,
+            "fairness_score": ":.2f",
+            "life_expectancy": ":.1f years",
+            "gini": ":.1f",
+        },
+        projection="natural earth",
+        title=f"Bubble size represents the total score",
+        color_continuous_scale="Viridis", # Changed from Plasma for better contrast
+        labels={
+            "fairness_score": "Index Score (0-6)",
+            "life_expectancy": "Life Expectancy",
+            "gini": "Gini Index"
+        }
+    )
+    
+    # Apply your exact styling from the "Social Development" dashboard
+    fig1.update_geos(
+        showcountries=True, countrycolor="DarkGrey",
+        showland=True, landcolor="lightgray",
+        showocean=True, oceancolor="LightBlue",
+        showlakes=True, lakecolor="LightBlue",
+        projection_type="natural earth",
+        coastlinewidth=0.5, coastlinecolor="DarkGrey",
+        lataxis_showgrid=False, lonaxis_showgrid=False
+    )
+    fig1.update_layout(
+        margin={"r":0,"t":40,"l":0,"b":0},
+        coloraxis_colorbar=dict(
+            title="Index Score",
+            orientation="h", y=-0.1, x=0.5,
+            xanchor="center", len=0.7
+        ),
+        geo_bgcolor="white",
+    )
+
+    # Add click event
+    clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
+
+    # --- 5. Capture click selection ---
+    click_selection = None
+    if clicked and clicked.selection and len(clicked.selection.points) > 0:
+        click_selection = clicked.selection.points[0]["hovertext"]
+
+    # --- 6. Country Trend ---
+    country_for_trend = search_selection if search_selection != "All Countries" else click_selection
+
+    if country_for_trend:
+        st.subheader(f"📊 Score Components Over Time — {country_for_trend}")
+        # Use the full, un-filtered components_df
+        country_df = components_df[components_df["country"] == country_for_trend]
+        
+        if country_df.empty:
+            st.warning(f"No trend data available for {country_for_trend}.")
+        else:
+            # Melt data for plotting
+            plot_data = country_df.melt(
+                id_vars=['date'], 
+                value_vars=components_df.columns.drop(['country', 'countryiso3code', 'date']),
+                var_name='Component', 
+                value_name='Normalized Score (0-1)'
+            )
+            # Clean up names
+            plot_data['Component'] = plot_data['Component'].str.replace('norm_', '').str.replace('_', ' ').str.title()
+            
+            fig2 = px.line(
+                plot_data,
+                x="date",
+                y="Normalized Score (0-1)",
+                color="Component",
+                title=f"Score Component Trends for {country_for_trend}"
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("Select a country from the search box or click one on the map to view its component trends.")
+
+    # --- 7. Data Table Section ---
+    with st.expander("View Score Data for All Countries"):
+        st.dataframe(
+            map_df.sort_values("fairness_score", ascending=False)
+            [['country', 'date', 'fairness_score', 'life_expectancy', 'gini', 'governance']]
+            .reset_index(drop=True)
+        )
