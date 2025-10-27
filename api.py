@@ -1,5 +1,3 @@
-# api.py
-
 import requests
 import pandas as pd
 import pycountry # You will need to install this: pip install pycountry
@@ -24,51 +22,88 @@ def get_country_mapping():
 
 NAME_TO_M49, NAME_TO_ISO3 = get_country_mapping()
 
-def get_un_data(indicator, country_name="All", year=2021):
+# --- IMF Data API---
+@st.cache_data
+def get_imf_data(indicator, countries="all", date="2010:2023"):
     """
-    Fetches UN indicator data and returns a clean DataFrame with the standard columns.
-    UN Indicator format: {database_id}/{indicator_id} e.g., "1/6"
-    """
-    if country_name == "All" or country_name == "all":
-        # UN API is slow with 'all', so it's better to query without an areaCode filter
-        url = f"http://data.un.org/ws/rest/data/{indicator}/?timePeriod={year}&format=json"
-    else:
-        # Map country name to UN's M49 numeric code
-        area_code = NAME_TO_M49.get(country_name)
-        if not area_code:
-            # Return empty if country not found in mapping
-            return pd.DataFrame(columns=["country", "countryiso3code", "date", "indicator_value"])
-        url = f"http://data.un.org/ws/rest/data/{indicator}/?areaCode={area_code}&timePeriod={year}&format=json"
-
-    response = requests.get(url)
-
-    if response.status_code != 200:
-        # Silently fail for now, but you could raise an exception
-        return pd.DataFrame(columns=["country", "countryiso3code", "date", "indicator_value"])
+    Fetches IMF indicator data from the DataMapper API
+    and returns a clean DataFrame with columns:
+    ['country', 'countryiso3code', 'date', 'indicator_value'].
     
-    data = response.json()
-    records = data.get("data", {}).get("records", [])
+    --- THIS IS THE FIX ---
+    The JSON from the IMF is nested { "values": { "INDICATOR_CODE": { ...data... }}}.
+    My previous code forgot to check for "INDICATOR_CODE".
+    This version correctly accesses the nested data blob.
+    """
+    base_url = f"https://www.imf.org/external/datamapper/api/v1/{indicator}"
+    
+    try:
+        response = requests.get(base_url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"IMF API request failed: {e}")
+        return pd.DataFrame(columns=["country", "countryiso3code", "date", "indicator_value"])
+    except requests.exceptions.JSONDecodeError:
+        st.error("Failed to decode JSON response from IMF API.")
+        return pd.DataFrame(columns=["country", "countryiso3code", "date", "indicator_value"])
+
+    # Unpivot the nested JSON
+    records = []
+    
+    # The actual data is one level deeper, under the indicator code itself.
+    data_blob = data.get("values", {}).get(indicator, {})
+    
+    if not data_blob:
+        st.error(f"IMF API: Data found, but 'values' or '{indicator}' key was missing in JSON response.")
+        return pd.DataFrame(columns=["country", "countryiso3code", "date", "indicator_value"])
+
+    for iso_code, year_data in data_blob.items():
+        if not isinstance(year_data, dict):
+            continue
+            
+        for year_str, value_obj in year_data.items():
+            
+            # --- Robustly parse the data ---
+            try:
+                if value_obj is None:
+                    continue
+                    
+                year = int(year_str)
+                
+                if isinstance(value_obj, (int, float)):
+                    value = float(value_obj)
+                else:
+                    value_str = str(value_obj).strip().replace(",", "")
+                    if value_str == "--" or value_str == "NA" or value_str == "n/a" or value_str == "":
+                        continue
+                    value = float(value_str) 
+                
+                records.append({
+                    "countryiso3code": iso_code,
+                    "date": year,
+                    "indicator_value": value
+                })
+            except (ValueError, TypeError):
+                continue
+
     if not records:
+        st.error(f"IMF API: No valid numeric data found for indicator {indicator}. All data points were null or non-numeric.")
         return pd.DataFrame(columns=["country", "countryiso3code", "date", "indicator_value"])
 
     df = pd.DataFrame(records)
-    
-    # Standardize the DataFrame to match the World Bank output
-    df.rename(columns={
-        "areaName": "country",
-        "timePeriod": "date",
-        "value": "indicator_value"
-    }, inplace=True)
-    
-    # Map country name to ISO3 code for consistency
-    df['countryiso3code'] = df['country'].map(NAME_TO_ISO3)
 
-    # Ensure required columns exist and have correct types
+    # --- Data Cleaning ---
+    def get_country_name_or_code(iso_code):
+        try:
+            return pycountry.countries.get(alpha_3=iso_code).name
+        except AttributeError:
+            return iso_code 
+
+    df['country'] = df['countryiso3code'].apply(get_country_name_or_code)
+        
+    # Reorder columns to match WB output
     df = df[["country", "countryiso3code", "date", "indicator_value"]]
-    df['date'] = pd.to_numeric(df['date'], errors='coerce')
-    df['indicator_value'] = pd.to_numeric(df['indicator_value'], errors='coerce')
-    df.dropna(inplace=True)
-
     return df.reset_index(drop=True)
 
 
@@ -103,25 +138,24 @@ def get_worldbank_data(indicator="NY.GDP.PCAP.CD", countries="all", date="2010:2
     return df.reset_index(drop=True)
 
 
-# --- The Master Data Fetcher (Adapter/Wrapper) ---
-def get_data(indicator_code, country_name="All", year=2021, countries_iso="all", date_range="2010:2023"):
+# --- Master Data Fetcher (Adapter/Wrapper) ---
+def get_data(indicator_code, countries="all", date="2010:2023"):
     """
     Decides which API to call based on the indicator prefix.
     - 'WB_' for World Bank
-    - 'UN_' for UN Data
+    - 'IMF_' for IMF
+    
+    The function signature is now standardized.
     """
     if indicator_code.startswith("WB_"):
-        # Strip prefix and call World Bank API
         wb_indicator = indicator_code.replace("WB_", "")
-        return get_worldbank_data(indicator=wb_indicator, countries=countries_iso, date=date_range)
+        return get_worldbank_data(indicator=wb_indicator, countries=countries, date=date)
     
-    elif indicator_code.startswith("UN_"):
-        # Strip prefix, format indicator, and call UN API
-        # UN indicators are often {db_id}/{indicator_id}
-        un_indicator = indicator_code.replace("UN_", "").replace("-", "/")
-        return get_un_data(indicator=un_indicator, country_name=country_name, year=year)
+    elif indicator_code.startswith("IMF_"):
+        imf_indicator = indicator_code.replace("IMF_", "")
+        return get_imf_data(indicator=imf_indicator, countries=countries, date=date)
     
     else:
         # Default or error
-        raise ValueError("Invalid indicator code prefix. Use 'WB_' or 'UN_'.")
+        raise ValueError("Invalid indicator code prefix. Use 'WB_' or 'IMF_'.")
     
