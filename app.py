@@ -34,7 +34,7 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Population Growth"]
+    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)"]
 )
 
 # ============================================================
@@ -190,34 +190,109 @@ if dashboard_option == "Social Development Overview":
 
 
 # ============================================================
-# BASIC DASHBOARD
+# Government Debt (IMF) DASHBOARD
 # ============================================================
-elif dashboard_option == "Population Growth":
-    # --- Load data ---
-    with st.spinner(f"Fetching {dashboard_option} data..."):
-        df = get_data("WB_SP.POP.GROW")
+elif dashboard_option == "Government Debt (IMF)":
+    st.markdown("### 🏛️ General Government Gross Debt (% of GDP)")
+    st.markdown("Data sourced from the **International Monetary Fund (IMF)** via its DataMapper API.")
 
-    if df.empty:
-        st.error(f"No data available for {dashboard_option}.")
+    # --- 1. Fetch data (ALL years) ---
+    with st.spinner("Loading IMF debt data for all years..."):
+        # We call get_data with the IMF code.
+        # The 'date' param is passed to the function, which will
+        # fetch all data and then filter it.
+        all_imf_data = get_data(
+            indicator_code="IMF_GGXWDG_NGDP", # General government gross debt
+            countries="all", # Pass 'all' so the function filters by country *after* fetching
+            date=f"{min(years)}:{max(years)}"
+        )
+
+    # --- 2. Validate data ---
+    if all_imf_data.empty:
+        st.error("IMF API returned no data for the Government Debt indicator.")
         st.stop()
 
-    # --- Apply Global Filters ---
-    filtered_df = df[df["date"] == selected_year]
-    if search_selection != "All Countries":
-        filtered_df = filtered_df[filtered_df["country"] == search_selection]
-
-    # --- Plotly Interactive Visualization ---
-    st.subheader(f"{dashboard_option} ({selected_year})")
-    fig = px.scatter(
-        filtered_df,
-        x="country",
-        y="indicator_value",
+    # --- 3. Apply Global Filters ---
+    year_df = all_imf_data[all_imf_data["date"] == selected_year]
+    
+    if year_df.empty:
+        st.warning(f"No IMF debt data available for {selected_year}.")
+        st.stop()
+        
+    map_df = year_df.copy()
+    # The 'search_selection' filter will be used for the trend chart
+    
+    # --- 4. Bubble Map (px.scatter_geo) ---
+    st.markdown(f"#### Government Debt as % of GDP ({selected_year})")
+    st.write("Click a country on the map to view its debt trend over time 👇")
+    
+    fig1 = px.scatter_geo(
+        map_df, 
+        locations="countryiso3code",
         color="indicator_value",
+        size="indicator_value", # Size bubbles by the debt value
         hover_name="country",
-        title=f"{dashboard_option} ({selected_year})",
+        hover_data={
+            "countryiso3code": False,
+            "indicator_value": ":.1f%", # Format as percentage
+        },
+        projection="natural earth",
+        title=f"Bubble size represents debt as % of GDP",
+        color_continuous_scale=px.colors.sequential.YlOrRd, # Red scale for debt
+        labels={
+            "indicator_value": "Debt (% of GDP)"
+        }
     )
-    fig.update_layout(xaxis_title="Country", yaxis_title=dashboard_option)
-    st.plotly_chart(fig, use_container_width=True)
+    
+    # Apply your preferred map styling
+    fig1.update_geos(
+        showcountries=True, countrycolor="DarkGrey",
+        showland=True, landcolor="lightgray",
+        showocean=True, oceancolor="LightBlue",
+        showlakes=True, lakecolor="LightBlue",
+        projection_type="natural earth",
+        coastlinewidth=0.5, coastlinecolor="DarkGrey",
+        lataxis_showgrid=False, lonaxis_showgrid=False
+    )
+    fig1.update_layout(
+        margin={"r":0,"t":40,"l":0,"b":0},
+        coloraxis_colorbar=dict(
+            title="Debt (% of GDP)",
+            orientation="h", y=-0.1, x=0.5,
+            xanchor="center", len=0.7
+        ),
+        geo_bgcolor="white",
+    )
+
+    clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
+
+    # --- 5. Capture click selection ---
+    click_selection = None
+    if clicked and clicked.selection and len(clicked.selection.points) > 0:
+        click_selection = clicked.selection.points[0]["hovertext"]
+
+    # --- 6. Country Trend ---
+    country_for_trend = search_selection if search_selection != "All Countries" else click_selection
+
+    if country_for_trend:
+        st.subheader(f"📈 Government Debt Over Time — {country_for_trend}")
+        
+        # Use the original full dataset (all_imf_data) for the trend
+        country_df = all_imf_data[all_imf_data["country"] == country_for_trend]
+        
+        if country_df.dropna(subset=['indicator_value']).empty:
+             st.warning(f"No debt trend data available for {country_for_trend}.")
+        else:
+            fig2 = px.line(
+                country_df.sort_values(by="date"), # Sort by date for a clean line
+                x="date",
+                y="indicator_value",
+                title=f"Government Debt as % of GDP ({country_for_trend})",
+                labels={"indicator_value": "Debt (% of GDP)"}
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("Select a country from the search box or click one on the map to view its trend.")
 
 # ============================================================
 # ECONOMIC OVERVIEW (CROSS-FILTER DASHBOARD)
