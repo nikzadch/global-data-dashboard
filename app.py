@@ -34,7 +34,8 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)", "Country Comparison"]
+    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)",
+      "Country Comparison", "European Demographics (Eurostat)"]
 )
 
 # ============================================================
@@ -690,3 +691,127 @@ elif dashboard_option == "Country Comparison":
             fig_life.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
             fig_life.update_layout(hovermode="x unified")
             st.plotly_chart(fig_life, use_container_width=True)
+
+
+# ============================================================
+# NEW DASHBOARD: EUROPEAN DEMOGRAPHICS (DATA COMMONS - EUROSTAT)
+# ============================================================
+if dashboard_option == "European Demographics (Eurostat)":
+    st.markdown("### 👶 European Demographics — Births vs. Marriages (Eurostat)")
+    st.info("ℹ️ This dashboard uses Eurostat data and will only display data for European countries.")
+
+    # --- Fetch data (Using DC_ prefixes for Eurostat data) ---
+    with st.spinner("Loading Data Commons (Eurostat) indicators..."):
+        
+        # Live births (total)
+        births_df = get_data("DC_eurostat/demo_fmonth")
+        
+        # Marriages (total)
+        marriages_df = get_data("DC_eurostat/demo_mro_ext")
+
+    # --- Validate data ---
+    if births_df.empty or marriages_df.empty:
+        st.error("Data Commons (Eurostat) API returned no data. This may be a temporary issue.")
+        st.stop()
+
+    # --- Merge datasets safely ---
+    merged = births_df.merge(marriages_df, on=["country", "countryiso3code", "date"], suffixes=("_births", "_marriages"))
+    
+    merged.rename(columns={
+        "indicator_value_births": "live_births",
+        "indicator_value_marriages": "total_marriages",
+    }, inplace=True)
+
+    if merged.empty:
+        st.error("No merged Eurostat data available — incomplete or non-overlapping datasets.")
+        st.stop()
+
+    # --- Apply Global Filters ---
+    year_df = merged[merged["date"] == selected_year]
+    if search_selection != "All Countries":
+        year_df = year_df[year_df["country"] == search_selection]
+
+    if year_df.empty:
+        st.warning(f"No combined Eurostat data available for the selected filters (Year: {selected_year}, Country: {search_selection}).")
+        st.stop()
+
+    # --- Bubble Map (px.scatter_geo) ---
+    st.markdown(f"#### Live Births vs. Total Marriages ({selected_year})")
+    st.write("Click a country on the map to view its live births trend over time 👇")
+    
+    fig1 = px.scatter_geo(
+        year_df, 
+        locations="countryiso3code",
+        color="live_births",  
+        size="total_marriages",      
+        hover_name="country",
+        hover_data={
+            "countryiso3code": False,
+            "live_births": ":,.0f",
+            "total_marriages": ":,.0f",
+        },
+        projection="natural earth",
+        title=f"Bubble size represents Total Marriages",
+        color_continuous_scale="Viridis", 
+        scope="europe", # <-- Zoom the map to Europe
+        labels={
+            "live_births": "Live Births",
+            "total_marriages": "Total Marriages"
+        }
+    )
+    
+    fig1.update_geos(
+        showcountries=True,
+        countrycolor="DarkGrey",
+        showland=True,
+        landcolor="lightgray",
+        showocean=True,
+        oceancolor="LightBlue",
+        showlakes=True,
+        lakecolor="LightBlue",
+        projection_type="natural earth",
+        coastlinewidth=0.5,
+        coastlinecolor="DarkGrey",
+        lataxis_showgrid=False,
+        lonaxis_showgrid=False
+    )
+    fig1.update_layout(
+        margin={"r":0,"t":40,"l":0,"b":0},
+        coloraxis_colorbar=dict(
+            title="Live Births", 
+            orientation="h",
+            y=-0.1,
+            x=0.5,
+            xanchor="center",
+            len=0.7
+        ),
+        geo_bgcolor="white",
+    )
+
+    clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
+
+    # --- Capture click selection ---
+    click_selection = None
+    if clicked and clicked.selection and len(clicked.selection.points) > 0:
+        click_selection = clicked.selection.points[0]["hovertext"]
+
+    # --- Country Trend ---
+    country_for_trend = search_selection if search_selection != "All Countries" else click_selection
+
+    if country_for_trend:
+        st.subheader(f"👶 Live Births Over Time — {country_for_trend}")
+        country_df = merged[merged["country"] == country_for_trend]
+        
+        if country_df.dropna(subset=['live_births']).empty:
+             st.warning(f"No live births trend data available for {country_for_trend}.")
+        else:
+            fig2 = px.line(
+                country_df,
+                x="date",
+                y="live_births", 
+                title=f"Live Births Over Time ({country_for_trend})",
+                labels={"live_births": "Live Births"}
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("Select a country from the search box or click one on the map to view its trend.")
