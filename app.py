@@ -640,6 +640,7 @@ elif dashboard_option == "Country Comparison":
                 labels={"indicator_value": "USD per capita"}
             )
             fig_gdp.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            fig_gdp.update_layout(hovermode="x unified")
             st.plotly_chart(fig_gdp, use_container_width=True)
 
     # --- Plot Chart 2: Inflation ---
@@ -655,6 +656,7 @@ elif dashboard_option == "Country Comparison":
                 labels={"indicator_value": "Annual % Change"}
             )
             fig_inf.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            fig_inf.update_layout(hovermode="x unified")
             st.plotly_chart(fig_inf, use_container_width=True)
 
     # --- Plot Chart 3: Government Debt ---
@@ -670,6 +672,7 @@ elif dashboard_option == "Country Comparison":
                 labels={"indicator_value": "% of GDP"}
             )
             fig_debt.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            fig_debt.update_layout(hovermode="x unified")
             st.plotly_chart(fig_debt, use_container_width=True)
             
     # --- Plot Chart 4: Life Expectancy ---
@@ -685,4 +688,5 @@ elif dashboard_option == "Country Comparison":
                 labels={"indicator_value": "Years"}
             )
             fig_life.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            fig_life.update_layout(hovermode="x unified")
             st.plotly_chart(fig_life, use_container_width=True)
