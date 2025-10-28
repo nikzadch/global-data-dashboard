@@ -34,7 +34,7 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)"]
+    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)", "Country Comparison"]
 )
 
 # ============================================================
@@ -557,3 +557,132 @@ elif dashboard_option == "Fairness & Development":
             [['country', 'date', 'fairness_score', 'life_expectancy', 'gini', 'governance']]
             .reset_index(drop=True)
         )
+
+# ============================================================
+# Country Comparison Dashboard
+# ============================================================         
+elif dashboard_option == "Country Comparison":
+    st.markdown("### 📈 Head-to-Head Country Comparison")
+
+    # --- 1. Dashboard-Specific Country Selectors ---
+    col1, col2 = st.columns(2)
+    with col1:
+        # Set safe defaults
+        default_a = "United States" if "United States" in countries else countries[0]
+        selected_country_a = st.selectbox(
+            "Select Country A",
+            options=countries,
+            index=countries.index(default_a)
+        )
+    with col2:
+        default_b = "China" if "China" in countries else countries[1]
+        selected_country_b = st.selectbox(
+            "Select Country B",
+            options=countries,
+            index=countries.index(default_b)
+        )
+    
+    st.markdown(f"#### Comparing: **{selected_country_a}** vs. **{selected_country_b}**")
+
+
+    # --- 2. Define Metrics and Fetch Data ---
+    indicators = {
+        "GDP per capita (USD)": {
+            "code": "WB_NY.GDP.PCAP.CD", 
+            "label": "GDP per capita (Current USD)"
+        },
+        "Inflation (Annual %)": {
+            "code": "IMF_PCPIPCH", 
+            "label": "Inflation, Avg. Consumer Prices (Annual %)"
+        },
+        "Government Debt (% of GDP)": {
+            "code": "IMF_GGXWDG_NGDP", 
+            "label": "General Gov. Gross Debt (% of GDP)"
+        },
+        "Life Expectancy (Years)": {
+            "code": "WB_SP.DYN.LE00.IN", 
+            "label": "Life Expectancy at Birth (Years)"
+        }
+    }
+    
+    # Fetch data for all 4 indicators
+    with st.spinner(f"Loading comparison data for {selected_country_a} and {selected_country_b}..."):
+        data_frames = {}
+        for metric_name, info in indicators.items():
+            # Get data for ALL years (ignoring global country filter)
+            all_data = get_data(
+                indicator_code=info["code"],
+                countries="all"
+            )
+            # Filter for only the two selected countries
+            if not all_data.empty:
+                filtered_df = all_data[
+                    all_data['country'].isin([selected_country_a, selected_country_b])
+                ]
+                data_frames[metric_name] = filtered_df
+            else:
+                data_frames[metric_name] = pd.DataFrame() # Empty
+    
+
+    # --- 3. Create 2x2 Grid for Charts ---
+    chart_col1, chart_col2 = st.columns(2)
+
+    # --- Plot Chart 1: GDP per capita ---
+    with chart_col1:
+        metric_name = "GDP per capita (USD)"
+        df = data_frames[metric_name]
+        if df.empty or df.shape[0] < 2:
+            st.warning(f"No comparison data available for {metric_name}.")
+        else:
+            fig_gdp = px.line(
+                df, x="date", y="indicator_value", color="country",
+                title=metric_name, 
+                labels={"indicator_value": "USD per capita"}
+            )
+            fig_gdp.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            st.plotly_chart(fig_gdp, use_container_width=True)
+
+    # --- Plot Chart 2: Inflation ---
+    with chart_col2:
+        metric_name = "Inflation (Annual %)"
+        df = data_frames[metric_name]
+        if df.empty or df.shape[0] < 2:
+            st.warning(f"No comparison data available for {metric_name}.")
+        else:
+            fig_inf = px.line(
+                df, x="date", y="indicator_value", color="country",
+                title=metric_name, 
+                labels={"indicator_value": "Annual % Change"}
+            )
+            fig_inf.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            st.plotly_chart(fig_inf, use_container_width=True)
+
+    # --- Plot Chart 3: Government Debt ---
+    with chart_col1:
+        metric_name = "Government Debt (% of GDP)"
+        df = data_frames[metric_name]
+        if df.empty or df.shape[0] < 2:
+            st.warning(f"No comparison data available for {metric_name}.")
+        else:
+            fig_debt = px.line(
+                df, x="date", y="indicator_value", color="country",
+                title=metric_name, 
+                labels={"indicator_value": "% of GDP"}
+            )
+            fig_debt.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            st.plotly_chart(fig_debt, use_container_width=True)
+            
+    # --- Plot Chart 4: Life Expectancy ---
+    with chart_col2:
+        metric_name = "Life Expectancy (Years)"
+        df = data_frames[metric_name]
+        if df.empty or df.shape[0] < 2:
+            st.warning(f"No comparison data available for {metric_name}.")
+        else:
+            fig_life = px.line(
+                df, x="date", y="indicator_value", color="country",
+                title=metric_name, 
+                labels={"indicator_value": "Years"}
+            )
+            fig_life.add_vline(x=selected_year, line_width=2, line_dash="dash", line_color="red")
+            st.plotly_chart(fig_life, use_container_width=True)
