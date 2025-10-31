@@ -5,7 +5,7 @@ from utils import fetch_and_merge_data, calculate_fairness_score
 
 st.set_page_config(page_title="World Bank Dashboards", layout="wide")
 
-st.title("🌍 World Bank Interactive Dashboards")
+st.title("🌍 Interactive Wold Dashboards")
 
 with st.expander("App information"):
     st.write("""
@@ -299,37 +299,68 @@ elif dashboard_option == "Government Debt (IMF)":
 # ECONOMIC OVERVIEW (CROSS-FILTER DASHBOARD)
 # ============================================================
 elif dashboard_option == "Economic Overview":
-    st.markdown("### 💹 Economic Overview — Explore GDP, Life Expectancy, and Population")
+    st.markdown("### 💹 Economic Overview — Cross-Country & Trend Analysis")
     
-    with st.expander("Data Explanation"):
+    with st.expander("About This Data"):
         st.write("""
-            **GDP (Gross Domestic Product):** GDP measures the total monetary value of all goods and services produced within a country's borders over a specific period. It's a key indicator of economic health.
+            This dashboard provides a high-level overview of global economic and development indicators from the World Bank.
+            * **GDP (Gross Domestic Product) per capita:** Measures the total economic output of a country, divided by its population.
+            * **GNI (Gross National Income) per capita:** Similar to GDP, but also includes income earned by residents from overseas investments.
+            * **Life Expectancy:** The average number of years a person is expected to live.
+            * **Population:** The total number of people living in the country.
+            * **CO2 Emissions (per capita):** Carbon dioxide (CO2) emissions excluding LULUCF (land use, land-use change, and forestry) per capita. A key environmental indicator.
         """)
-        st.write("""
-            **Life Expectancy:** Life expectancy is the average number of years a person is expected to live based on current mortality rates. It's a key metric for gauging the health and longevity of a population.
-    """)
 
     # --- Fetch data ---
-    with st.spinner("Loading economic indicators..."):
+    # We add GNI and CO2 emissions to the data pull
+    with st.spinner("Loading economic indicators from World Bank API..."):
         gdp_df = get_data("WB_NY.GDP.PCAP.CD")      # GDP per capita
         life_df = get_data("WB_SP.DYN.LE00.IN")    # Life Expectancy at Birth
         pop_df = get_data("WB_SP.POP.TOTL")        # Population total
+        gni_df = get_data("WB_NY.GNP.PCAP.CD")     # GNI per capita
+        # UPDATED INDICATOR: EN.ATM.CO2E.PC is no longer available.
+        # Using EN.GHG.CO2.PC.CE.AR5 (CO2 emissions excl. LULUCF per capita) instead.
+        co2_df = get_data("WB_EN.GHG.CO2.PC.CE.AR5") # CO2 emissions (metric tons per capita)
 
     # --- Validate data ---
-    if gdp_df.empty or life_df.empty or pop_df.empty:
-        st.error("World Bank API returned no data for one of the indicators.")
+    if gdp_df.empty or life_df.empty or pop_df.empty or gni_df.empty or co2_df.empty:
+        st.error("World Bank API returned no data for one or more key indicators. Please try again later.")
         st.stop()
 
     # --- Merge datasets ---
-    merged = (
-        gdp_df.merge(life_df, on=["country", "countryiso3code", "date"], suffixes=("_gdp", "_life"))
-              .merge(pop_df, on=["country", "countryiso3code", "date"])
-    )
+    # We follow your original merge logic, which suffixes and renames the final 'indicator_value'
+    # This can be complex, so we'll merge and rename all ambiguous columns for clarity.
+    
+    # Merge gdp + life
+    merged = gdp_df.merge(life_df, on=["country", "countryiso3code", "date"], suffixes=("_gdp", "_life"))
+    
+    # Merge in pop
+    merged = merged.merge(pop_df, on=["country", "countryiso3code", "date"])
+    # 'indicator_value' is now from pop_df, let's rename it
     merged.rename(columns={"indicator_value": "population"}, inplace=True)
+    
+    # Merge in gni
+    merged = merged.merge(gni_df, on=["country", "countryiso3code", "date"])
+    # 'indicator_value' is now from gni_df
+    merged.rename(columns={"indicator_value": "gni_per_capita"}, inplace=True)
+    
+    # Merge in co2
+    merged = merged.merge(co2_df, on=["country", "countryiso3code", "date"])
+    # 'indicator_value' is now from co2_df
+    merged.rename(columns={"indicator_value": "co2_emissions_pc"}, inplace=True)
 
+    # Rename the first two columns that had suffixes
+    merged.rename(columns={
+        "indicator_value_gdp": "gdp_per_capita",
+        "indicator_value_life": "life_expectancy"
+    }, inplace=True)
+    
     if merged.empty:
         st.error("No merged data available — World Bank API returned incomplete datasets.")
         st.stop()
+    
+    # Sort by date to make trend calculations easier
+    merged.sort_values(by="date", ascending=False, inplace=True)
 
     # --- Apply Global Filters ---
     year_df = merged[merged["date"] == selected_year]
@@ -337,92 +368,170 @@ elif dashboard_option == "Economic Overview":
         year_df = year_df[year_df["country"] == search_selection]
 
     # --- Choropleth Map ---
-    st.markdown(f"#### Life Expectancy Across Countries ({selected_year})") # Use Streamlit markdown for title
-    st.write("Click a country on the map to view its trends over time 👇")
-    fig1 = px.choropleth(
-        year_df,
-        locations="countryiso3code",  # Use ISO-3 country codes for mapping
-        color="indicator_value_life", # Color countries by life expectancy
-        hover_name="country",         # Display full country name on hover
-        hover_data={
-            "countryiso3code": False,
-            "indicator_value_life": ":.1f years", # Formatted life expectancy
-            "indicator_value_gdp": ":,.0f USD",   # Formatted GDP
-            "population": ":,.0f"                 # Formatted population
-        },
-        color_continuous_scale="Viridis", # A good perceptually uniform colormap
-        labels={"indicator_value_life": "Life Expectancy (years)"},
-    )
-    # Professional map styling
-    fig1.update_geos(
-        showcountries=True,
-        countrycolor="DarkGrey",
-        showland=True,
-        landcolor="lightgray",
-        showocean=True,
-        oceancolor="LightBlue",
-        showlakes=True,
-        lakecolor="LightBlue",
-        projection_type="natural earth", # Natural earth projection looks good
-        coastlinewidth=0.5,
-        coastlinecolor="DarkGrey",
-        lataxis_showgrid=False, # Hide latitude gridlines
-        lonaxis_showgrid=False  # Hide longitude gridlines
-    )
-    fig1.update_layout(
-        margin={"r":0,"t":0,"l":0,"b":0}, # Remove margins
-        coloraxis_colorbar=dict(
-            title="Life Expectancy (years)", # Set a clear colorbar title
-            orientation="h", # Horizontal colorbar is often cleaner at the bottom
-            y=-0.1, # Position below the map
-            x=0.5,
-            xanchor="center",
-            len=0.7 # Make it wider
-        ),
-        geo_bgcolor="white", # Ensure background is white
-    )
-    
-    clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
+    with st.container(border=True):
+        st.markdown(f"#### 🌎 Global Development Indicators ({selected_year})")
+        st.write("Click a country on the map to view its detailed metrics and trends below 👇")
+        fig1 = px.choropleth(
+            year_df,
+            locations="countryiso3code",
+            color="life_expectancy",
+            hover_name="country",
+            hover_data={
+                "countryiso3code": False,
+                "life_expectancy": ":.1f years",
+                "gdp_per_capita": ":,.0f USD",
+                "gni_per_capita": ":,.0f USD",
+                "population": ":,.0f",
+                "co2_emissions_pc": ":.2f tons"
+            },
+            color_continuous_scale="Viridis",
+            labels={
+                "life_expectancy": "Life Expectancy (years)",
+                "gdp_per_capita": "GDP per capita (USD)",
+                "gni_per_capita": "GNI per capita (USD)",
+                "population": "Population",
+                "co2_emissions_pc": "CO2 Emissions (tons/capita)"
+            },
+        )
+        # Use your professional map styling
+        fig1.update_geos(
+            showcountries=True, countrycolor="DarkGrey",
+            showland=True, landcolor="rgb(243, 243, 243)",
+            showocean=True, oceancolor="rgb(217, 237, 247)",
+            showlakes=True, lakecolor="rgb(217, 237, 247)",
+            projection_type="natural earth",
+            coastlinewidth=0.5, coastlinecolor="DarkGrey",
+            lataxis_showgrid=False, lonaxis_showgrid=False
+        )
+        fig1.update_layout(
+            margin={"r":0,"t":25,"l":0,"b":0},
+            coloraxis_colorbar=dict(
+                title="Life Expectancy",
+                orientation="h",
+                y=-0.1,
+                x=0.5,
+                xanchor="center",
+                len=0.7
+            ),
+            geo_bgcolor="rgba(0,0,0,0)", # Transparent background
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        
+        clicked = st.plotly_chart(fig1, use_container_width=True, on_select="rerun")
 
     # --- Capture click selection ---
     click_selection = None
     if clicked and clicked.selection and len(clicked.selection.points) > 0:
+        # Get the 'hover_name' which we set to be the country name
         click_selection = clicked.selection.points[0]["hovertext"]
 
-    # --- Country Trend Charts ---
+    # --- Country Trend Charts & Metrics ---
+    # Determine the country to focus on
     country_for_trend = search_selection if search_selection != "All Countries" else click_selection
 
     if country_for_trend:
-        st.subheader(f"📈 Economic & Population Trends — {country_for_trend}")
+        st.subheader(f"📊 Key Metrics & Trends — {country_for_trend}")
         country_df = merged[merged["country"] == country_for_trend]
 
-        col1, col2 = st.columns(2)
+        # --- NEW: Key Metrics Block ---
+        with st.container(border=True):
+            # Get data for selected year and previous year
+            current_data = country_df[country_df["date"] == selected_year]
+            prev_year_data = country_df[country_df["date"] == (selected_year - 1)]
 
-        with col1:
-            # Chart 1: GDP Trend
-            fig2 = px.line(
-                country_df,
-                x="date",
-                y="indicator_value_gdp",
-                title=f"GDP per Capita Over Time",
-                labels={"indicator_value_gdp": "GDP per capita (US$)"},
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+            # Helper function to safely get metric values and deltas
+            def get_metric_values(metric_name):
+                current_val = current_data[metric_name].iloc[0] if not current_data.empty else None
+                prev_val = prev_year_data[metric_name].iloc[0] if not prev_year_data.empty else None
+                
+                delta = None
+                if current_val is not None and prev_val is not None:
+                    if prev_val != 0:
+                        delta = current_val - prev_val
+                    else:
+                        delta = current_val # Avoid division by zero, show absolute change
+                return current_val, delta
 
-        with col2:
-            # Chart 2: Population Trend
-            fig3 = px.line(
-                country_df,
-                x="date",
-                y="population",
-                title=f"Population Over Time",
-                labels={"population": "Total Population"},
-                color_discrete_sequence=['#FF8C00'] # Orange color for contrast
+            # Get all metric values
+            life_val, life_delta = get_metric_values("life_expectancy")
+            gdp_val, gdp_delta = get_metric_values("gdp_per_capita")
+            gni_val, gni_delta = get_metric_values("gni_per_capita")
+            pop_val, pop_delta = get_metric_values("population")
+            co2_val, co2_delta = get_metric_values("co2_emissions_pc")
+
+            # Display metrics in 5 columns
+            met1, met2, met3, met4, met5 = st.columns(5)
+            with met1:
+                st.metric(
+                    label=f"Life Expectancy ({selected_year})",
+                    value=f"{life_val:.1f} yrs" if life_val is not None else "N/A",
+                    delta=f"{life_delta:.1f} yrs" if life_delta is not None else None,
+                )
+            with met2:
+                st.metric(
+                    label=f"GDP per capita ({selected_year})",
+                    value=f"${gdp_val:,.0f}" if gdp_val is not None else "N/A",
+                    delta=f"${gdp_delta:,.0f}" if gdp_delta is not None else None,
+                )
+            with met3:
+                st.metric(
+                    label=f"GNI per capita ({selected_year})",
+                    value=f"${gni_val:,.0f}" if gni_val is not None else "N/A",
+                    delta=f"${gni_delta:,.0f}" if gni_delta is not None else None,
+                )
+            with met4:
+                st.metric(
+                    label=f"Population ({selected_year})",
+                    value=f"{pop_val:,.0f}" if pop_val is not None else "N/A",
+                    delta=f"{pop_delta:,.0f}" if pop_delta is not None else None,
+                )
+            with met5:
+                st.metric(
+                    label=f"CO2 Emissions/capita ({selected_year})",
+                    value=f"{co2_val:.2f} tons" if co2_val is not None else "N/A",
+                    delta=f"{co2_delta:.2f} tons" if co2_delta is not None else None,
+                    delta_color="inverse" # Higher emissions are "bad"
+                )
+
+        # --- NEW: Trend Charts in Tabs ---
+        tab_life, tab_gdp, tab_gni, tab_pop, tab_co2 = st.tabs([
+            "🧬 Life Expectancy", "💰 GDP per capita", "📈 GNI per capita", "👥 Population", "💨 CO2 Emissions"
+        ])
+
+        # Helper to create clean trend charts
+        def create_trend_chart(df, y_col, title, y_label, color, format_str):
+            fig = px.line(
+                df, x="date", y=y_col,
+                title=title,
+                labels={"date": "Year", y_col: y_label},
+                color_discrete_sequence=[color]
             )
-            st.plotly_chart(fig3, use_container_width=True)
+            fig.update_layout(template="plotly_white", title_x=0.5, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            fig.update_traces(hovertemplate=f"Year: %{{x}}<br>{y_label}: %{{y:{format_str}}}<extra></extra>")
+            return fig
+
+        with tab_life:
+            fig_life = create_trend_chart(country_df, "life_expectancy", "Life Expectancy Over Time", "Life Expectancy (years)", '#1f77b4', '.1f')
+            st.plotly_chart(fig_life, use_container_width=True)
+            
+        with tab_gdp:
+            fig_gdp = create_trend_chart(country_df, "gdp_per_capita", "GDP per Capita Over Time", "GDP per capita (USD)", '#2ca02c', ',.0f')
+            st.plotly_chart(fig_gdp, use_container_width=True)
+            
+        with tab_gni:
+            fig_gni = create_trend_chart(country_df, "gni_per_capita", "GNI per Capita Over Time", "GNI per capita (USD)", '#d62728', ',.0f')
+            st.plotly_chart(fig_gni, use_container_width=True)
+
+        with tab_pop:
+            fig_pop = create_trend_chart(country_df, "population", "Population Over Time", "Total Population", '#ff7f0e', ',.0f')
+            st.plotly_chart(fig_pop, use_container_width=True)
+            
+        with tab_co2:
+            fig_co2 = create_trend_chart(country_df, "co2_emissions_pc", "CO2 Emissions per Capita Over Time", "CO2 (tons per capita)", '#9467bd', '.2f')
+            st.plotly_chart(fig_co2, use_container_width=True)
             
     else:
-        st.info("Select a country from the search box or click one on the map to view its trends.")
+        st.info("Select a country from the search box or click one on the map to view its detailed metrics and trends.")
 
 
 # ============================================================
