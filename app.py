@@ -35,7 +35,7 @@ st.markdown(
 # --- Dashboard selection ---
 dashboard_option = st.sidebar.selectbox(
     "Select Dashboard:",
-    [ "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)",
+    ["Global Comparative Dashboard", "Economic Overview", "Social Development Overview", "Fairness & Development", "Government Debt (IMF)",
       "Country Comparison"]
 )
 
@@ -929,3 +929,383 @@ elif dashboard_option == "Country Comparison":
             fig_life.update_layout(hovermode="x unified")
             st.plotly_chart(fig_life, use_container_width=True)
 
+# ============================================================
+# GLOBAL COMPARATIVE DASHBOARD
+# ============================================================
+elif dashboard_option == "Global Comparative Dashboard":
+    st.markdown("### 🌍 Global Comparative Dashboard")
+    st.write("Analyze global trends and compare countries using cross-filtering. Select a year and then use the filters below to explore the data.")
+
+    # --- Initialize session state for cross-filtering ---
+    if 'global_comp_selection' not in st.session_state:
+        st.session_state.global_comp_selection = set()
+    
+    # --- Initialize state for "stale event" checking ---
+    if 'last_map_event' not in st.session_state:
+        st.session_state.last_map_event = None
+    if 'last_scatter_event' not in st.session_state:
+        st.session_state.last_scatter_event = None
+    if 'last_donut_event' not in st.session_state:
+        st.session_state.last_donut_event = None
+    if 'last_bar_event' not in st.session_state:
+        st.session_state.last_bar_event = None
+
+
+    with st.expander("About This Data"):
+        st.write("""
+            This dashboard provides a comparative overview of all countries for a selected year.
+            * **Cross-Filtering:** Click a country on the map, donut, or bar chart, or use the 'box select'/'lasso select' tool on the scatter plot to filter the "Selected Countries" charts below.
+            * **Double-click** any chart or use the 'Clear All Selections' button to reset.
+            * **Life Expectancy:** Average number of years a person is expected to live.
+            * **GDP per capita:** Gross Domestic Product divided by midyear population.
+            * **Rural Population (%):** Percentage of the total population living in rural areas.
+            * **Forest Area (%):** Percentage of total land area that is covered by forests.
+            * **Access to Electricity (%):** Percentage of the population with access to electricity.
+        """)
+        st.info("Note: This dashboard is designed for a 'world view' and therefore **ignores the global 'Select a Country' filter**. It only uses the global 'Select a Year' filter.")
+
+    # --- Fetch data ---
+    with st.spinner("Loading global development indicators from World Bank API..."):
+        life_df = get_data("WB_SP.DYN.LE00.IN")       # Life Expectancy at Birth
+        gdp_df = get_data("WB_NY.GDP.PCAP.CD")        # GDP per capita
+        pop_df = get_data("WB_SP.POP.TOTL")           # Population total
+        rural_df = get_data("WB_SP.RUR.TOTL.ZS")      # Rural population (% of total)
+        forest_df = get_data("WB_AG.LND.FRST.ZS")     # Forest area (% of land area)
+        elec_df = get_data("WB_EG.ELC.ACCS.ZS")       # Access to electricity (% of pop)
+
+    # --- Validate data ---
+    if gdp_df.empty or life_df.empty or pop_df.empty or rural_df.empty or forest_df.empty or elec_df.empty:
+        st.error("World Bank API returned no data for one or more key indicators. Please try again later.")
+        st.stop()
+
+    # --- Merge datasets ---
+    # We merge all dataframes, carefully renaming the 'indicator_value' at each step.
+    
+    # 1. Merge life + gdp
+    merged = life_df.merge(gdp_df, on=["country", "countryiso3code", "date"], suffixes=("_life", "_gdp"))
+    
+    # 2. Merge in pop
+    merged = merged.merge(pop_df, on=["country", "countryiso3code", "date"])
+    merged.rename(columns={"indicator_value": "population"}, inplace=True)
+    
+    # 3. Merge in rural %
+    merged = merged.merge(rural_df, on=["country", "countryiso3code", "date"])
+    merged.rename(columns={"indicator_value": "rural_pop_pct"}, inplace=True)
+    
+    # 4. Merge in forest %
+    merged = merged.merge(forest_df, on=["country", "countryiso3code", "date"])
+    merged.rename(columns={"indicator_value": "forest_area_pct"}, inplace=True)
+    
+    # 5. Merge in electricity %
+    merged = merged.merge(elec_df, on=["country", "countryiso3code", "date"])
+    merged.rename(columns={"indicator_value": "access_to_electricity_pct"}, inplace=True)
+
+    # 6. Rename the first two columns
+    merged.rename(columns={
+        "indicator_value_life": "life_expectancy",
+        "indicator_value_gdp": "gdp_per_capita"
+    }, inplace=True)
+
+    if merged.empty:
+        st.error("No merged data available — World Bank API returned incomplete datasets.")
+        st.stop()
+
+    # --- Filter by Global Year ---
+    # We only use the global 'selected_year'
+    year_df = merged[merged["date"] == selected_year].copy()
+    
+    if year_df.empty:
+        st.warning(f"No comprehensive data found for the year {selected_year}. Please select a different year.")
+        st.stop()
+
+    # --- Dashboard-Specific Filters ---
+    st.markdown("#### 📊 Dashboard Filters")
+    with st.container(border=True):
+        # Clean data for sliders (remove NaNs)
+        year_df.dropna(subset=['population', 'access_to_electricity_pct', 'life_expectancy', 'gdp_per_capita', 'rural_pop_pct'], inplace=True)
+
+        f_col1, f_col2 = st.columns(2)
+        
+        with f_col1:
+            # Population Slider
+            min_pop, max_pop = float(year_df['population'].min()), float(year_df['population'].max())
+            pop_range = st.slider(
+                "Filter by Population",
+                min_value=min_pop,
+                max_value=max_pop,
+                value=(min_pop, max_pop),
+                format="%d"
+            )
+        
+        with f_col2:
+            # Electricity Access Slider
+            min_elec, max_elec = float(year_df['access_to_electricity_pct'].min()), float(year_df['access_to_electricity_pct'].max())
+            elec_range = st.slider(
+                "Filter by Access to Electricity (%)",
+                min_value=min_elec,
+                max_value=max_elec,
+                value=(min_elec, max_elec),
+                format="%.0f%%"
+            )
+
+    # Apply filters
+    df_filtered = year_df[
+        (year_df['population'] >= pop_range[0]) &
+        (year_df['population'] <= pop_range[1]) &
+        (year_df['access_to_electricity_pct'] >= elec_range[0]) &
+        (year_df['access_to_electricity_pct'] <= elec_range[1])
+    ]
+
+    if df_filtered.empty:
+        st.warning("No countries match the selected filter criteria.")
+        st.stop()
+
+    # --- Define Drilldown Data based on State ---
+    # MOVED THIS BLOCK UP so df_drildown is available for Row 1 Metrics
+    if st.session_state.global_comp_selection:
+        # Filter the df_filtered by the selection
+        df_drildown = df_filtered[df_filtered['country'].isin(st.session_state.global_comp_selection)].copy()
+        
+        # Ensure selected countries are still valid after slider changes
+        if df_drildown.empty:
+            # Selection is no longer valid (e.g., filtered out by slider), reset
+            st.session_state.global_comp_selection = set()
+            df_drildown = df_filtered.copy()
+            metrics_title = f"Metrics for All Filtered Countries ({selected_year})"
+        else:
+            metrics_title = f"Metrics for Selected Countries ({len(st.session_state.global_comp_selection)})"
+    else:
+        df_drildown = df_filtered.copy()
+        metrics_title = f"Metrics for All Filtered Countries ({selected_year})"
+
+
+    # --- Row 1: World Metrics ---
+    st.markdown(f"#### 🌎 {metrics_title}") # UPDATED title
+    with st.container(border=True):
+        total_pop = df_drildown['population'].sum() # UPDATED df_drildown
+        
+        # Calculate weighted averages
+        if total_pop > 0:
+            avg_life_exp = (df_drildown['life_expectancy'] * df_drildown['population']).sum() / total_pop # UPDATED
+            avg_gdp_pc = (df_drildown['gdp_per_capita'] * df_drildown['population']).sum() / total_pop # UPDATED
+        else:
+            avg_life_exp = 0
+            avg_gdp_pc = 0
+
+        met_col1, met_col2, met_col3, met_col4 = st.columns(4)
+        met_col1.metric("Total Countries", f"{df_drildown.shape[0]:,}") # UPDATED
+        met_col2.metric("Total Population", f"{total_pop:,.0f}")
+        met_col3.metric("Avg. Life Expectancy", f"{avg_life_exp:.1f} yrs")
+        met_col4.metric("Avg. GDP per capita", f"${avg_gdp_pc:,.0f}")
+        
+    # --- Row 2: Map & Scatter (with cross-filtering) ---
+    st.markdown("#### 🗺️ Interactive Selector Charts")
+    st.write("Click map or select on scatter plot to filter charts below. Double-click to clear.")
+    
+    if st.button("Clear All Selections"):
+        st.session_state.global_comp_selection = set()
+        st.rerun()
+    
+    chart_col1, chart_col2 = st.columns([2, 3]) # Give scatter plot more space
+    
+    with chart_col1:
+        with st.container(border=True):
+            fig_map = px.choropleth(
+                df_filtered, # Always show all filtered countries
+                locations="countryiso3code",
+                color="life_expectancy",
+                hover_name="country",
+                hover_data={
+                    "countryiso3code": False,
+                    "life_expectancy": ":.1f years",
+                    "gdp_per_capita": ":,.0f USD",
+                    "population": ":,.0f",
+                },
+                color_continuous_scale="Viridis",
+                labels={"life_expectancy": "Life Expectancy"},
+                title="Global Life Expectancy"
+            )
+            fig_map.update_geos(
+                showcountries=True, countrycolor="DarkGrey",
+                showland=True, landcolor="rgb(243, 243, 243)",
+                showocean=True, oceancolor="rgb(217, 237, 247)",
+                projection_type="natural earth",
+                coastlinewidth=0.5,
+            )
+            fig_map.update_layout(
+                margin={"r":0,"t":40,"l":0,"b":0},
+                geo_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            # Use on_select for click events
+            map_event = st.plotly_chart(fig_map, use_container_width=True, on_select="rerun")
+
+    with chart_col2:
+        with st.container(border=True):
+            fig_scatter = px.scatter(
+                df_filtered, # Always show all filtered countries
+                x="rural_pop_pct",
+                y="life_expectancy",
+                size="population",
+                color="gdp_per_capita",
+                hover_name="country",
+                hover_data={
+                    "country": True,
+                    "rural_pop_pct": ":.1f%",
+                    "life_expectancy": ":.1f yrs",
+                    "population": ":,.0f",
+                    "gdp_per_capita": ":,.0f USD"
+                },
+                color_continuous_scale="Cividis", # CHANGED: Better for dark mode
+                labels={
+                    "rural_pop_pct": "Rural Population (%)",
+                    "life_expectancy": "Life Expectancy (years)",
+                    "gdp_per_capita": "GDP per capita (USD)",
+                    "population": "Population"
+                },
+                title="Rural Population vs. Life Expectancy"
+            )
+            fig_scatter.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            # Use on_select for box/lasso select events
+            scatter_event = st.plotly_chart(fig_scatter, use_container_width=True, on_select="rerun")
+
+    # --- Define Drilldown Data based on State ---
+    if st.session_state.global_comp_selection:
+        # Title for detail charts
+        st.markdown(f"#### Selected Countries ({df_drildown.shape[0]})")
+    else:
+        # Title for detail charts
+        st.markdown("#### All Filtered Countries")
+
+
+    # --- Row 3: Donut & Bar Charts (responsive to selection) ---
+    detail_col1, detail_col2 = st.columns(2)
+    
+    with detail_col1:
+        with st.container(border=True):
+            # 1. Donut Chart
+            fig_donut = px.pie(
+                df_drildown, # Uses the state-filtered data
+                names="country",
+                values="population",
+                title="Population Distribution of Selection",
+                hole=0.4,
+            )
+            fig_donut.update_traces(textposition='inside', textinfo='percent+label')
+            fig_donut.update_layout(showlegend=False, paper_bgcolor="rgba(0,0,0,0)")
+            donut_event = st.plotly_chart(fig_donut, use_container_width=True, on_select="rerun") # ADDED event capture
+
+    with detail_col2:
+        with st.container(border=True):
+            # 2. Bar Chart
+            # Get top 15 by forest area, or all if fewer than 15
+            top_n = min(15, df_drildown.shape[0])
+            df_bar = df_drildown.nlargest(top_n, 'forest_area_pct').sort_values('forest_area_pct', ascending=False)
+            
+            fig_bar = px.bar(
+                df_bar, # Uses the state-filtered data
+                x="country",
+                y="forest_area_pct",
+                color="forest_area_pct",
+                color_continuous_scale="Greens",
+                title=f"Top {top_n} by Forest Area (% of Land)",
+                labels={"forest_area_pct": "Forest Area (%)", "country": "Country"}
+            )
+            fig_bar.update_layout(coloraxis_showscale=False, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            bar_event = st.plotly_chart(fig_bar, use_container_width=True, on_select="rerun") # ADDED event capture
+
+    # --- Row 4: Data Table ---
+    with st.container(border=True):
+        st.markdown("##### Data for Selection")
+        st.dataframe(
+            df_drildown[[ # Uses the state-filtered data
+                "country", "life_expectancy", "gdp_per_capita", "population",
+                "rural_pop_pct", "forest_area_pct", "access_to_electricity_pct"
+            ]].set_index("country"),
+            use_container_width=True
+        )
+
+    # --- Cross-Filtering Event Handling ---
+    # This block processes click events from ANY chart and updates the session state
+    # It solves the "stale event" problem by comparing the current event to the last known event.
+    
+    # Helper function to check for *active* selection points
+    def get_points(event_data):
+        if event_data and "selection" in event_data and "points" in event_data["selection"] and event_data["selection"]["points"]:
+            return event_data["selection"]["points"]
+        return None
+
+    # Helper function to check for an *active* deselect event
+    def is_deselect_event(event_data):
+        # A deselect is an event that exists, has a 'selection' dict, 
+        # but has an empty 'points' list.
+        if event_data and "selection" in event_data and \
+           "points" in event_data["selection"] and not event_data["selection"]["points"]:
+            return True
+        return False
+
+    new_selection_set = set()
+    selection_made = False # This means "an event was processed"
+    is_reset_event = False
+
+    # --- Process the first *NEW* event ---
+    # We use if/elif to process only ONE event per run.
+    
+    if map_event != st.session_state.last_map_event:
+        st.session_state.last_map_event = map_event # Update state
+        selection_made = True
+        map_points = get_points(map_event)
+        if map_points:
+            new_selection_set.update(p["hovertext"] for p in map_points)
+        elif is_deselect_event(map_event):
+            is_reset_event = True
+
+    elif scatter_event != st.session_state.last_scatter_event:
+        st.session_state.last_scatter_event = scatter_event # Update state
+        selection_made = True
+        scatter_points = get_points(scatter_event)
+        if scatter_points:
+            new_selection_set.update(p["hovertext"] for p in scatter_points)
+        elif is_deselect_event(scatter_event):
+            is_reset_event = True
+    
+    elif donut_event != st.session_state.last_donut_event:
+        st.session_state.last_donut_event = donut_event # Update state
+        donut_points = get_points(donut_event)
+        if donut_points:
+            selection_made = True
+            new_selection_set.update(p["label"] for p in donut_points)
+        elif is_deselect_event(donut_event) and not st.session_state.global_comp_selection:
+            # This is a REAL deselect (a double-click when state is already empty)
+            # We ignore deselects on this chart if state is *active* (that's the flicker)
+            selection_made = True
+            is_reset_event = True
+
+    elif bar_event != st.session_state.last_bar_event:
+        st.session_state.last_bar_event = bar_event # Update state
+        bar_points = get_points(bar_event)
+        if bar_points:
+            selection_made = True
+            new_selection_set.update(p["x"] for p in bar_points)
+        elif is_deselect_event(bar_event) and not st.session_state.global_comp_selection:
+            # This is a REAL deselect
+            # We ignore deselects on this chart if state is *active* (that's the flicker)
+            selection_made = True
+            is_reset_event = True
+    
+    # --- Update the main selection state ---
+    if selection_made:
+        current_selection = st.session_state.global_comp_selection
+        
+        if is_reset_event:
+            if current_selection: # Only rerun if state is not already empty
+                st.session_state.global_comp_selection = set()
+                st.rerun()
+        
+        elif new_selection_set != current_selection:
+            st.session_state.global_comp_selection = new_selection_set
+            st.rerun()
